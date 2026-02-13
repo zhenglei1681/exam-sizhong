@@ -1,0 +1,39 @@
+# 阅卷系统主配置文件
+
+# 授权配置
+license:
+  enabled: true
+  valid_days: 365
+
+# AI 配置
+ai:
+  # 模式选择: local (本地模型) 或 api (商业API)
+  mode: api
+
+  # 本地模型配置（如 Ollama、LM Studio）
+  local:
+    base_url: "http://localhost:11434/v1"
+    model: "llama3.2"
+
+  # API 模式配置（如 DeepSeek、OpenAI、通义千问等）
+  api:
+    base_url: "https://api.deepseek.com/v1"
+    api_key: "sk-your-api-key-here"
+    model: "deepseek-chat"
+
+  # 通用配置
+  max_retries: 3
+  timeout: 60
+  temperature: 0.3
+
+# OCR 配置
+ocr:
+  engine: paddleocr
+  use_gpu: false
+  lang: ch
+
+# 应用配置
+app:
+  debug: false
+  screenshot_dir: "screenshots"
+  log_dir: "logs"

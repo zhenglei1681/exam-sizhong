@@ -1,0 +1,40 @@
+# 题目配置文件
+
+# 题目列表
+questions:
+  - id: 1
+    text: "请简述Python中的装饰器作用。"
+    answer: "装饰器是一种可以在不修改原函数代码的情况下，为函数添加额外功能的语法糖。"
+    points: 10
+
+  - id: 2
+    text: "什么是闭包？"
+    answer: "闭包是指在一个函数内部定义的函数，该内部函数可以访问外部函数的局部变量，即使外部函数已经返回。"
+    points: 10
+
+  - id: 3
+    text: "请列举Python中常用的数据结构。"
+    answer: "列表(list)、元组(tuple)、字典(dict)、集合(set)、字符串(str)"
+    points: 20
+
+# 评分规则
+scoring:
+  passing_score: 60
+
+# AI 判卷提示词模板
+prompt_template: |
+  你是一个阅卷专家，请根据以下信息判阅学生的答案。
+
+  题目：{question}
+  标准答案：{standard_answer}
+  学生答案：{student_answer}
+  满分：{max_points}
+
+  请严格按照以下要求判阅：
+  1. 仔细比较学生答案与标准答案
+  2. 根据答案的完整性和正确性给分
+  3. 给分范围：0-{max_points}分
+  4. 必须给出简要评语说明给分理由
+
+  请以JSON格式返回结果，格式如下：
+  {{"score": 实际得分, "comment": "评语"}}

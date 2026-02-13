@@ -1,0 +1,39 @@
+# 浏览器配置文件
+
+# 浏览器设置
+browser:
+  headless: false
+  timeout: 30000
+  viewport:
+    width: 1920
+    height: 1080
+
+# 目标网页
+target:
+  url: "https://example.com/exam"
+
+# 页面元素选择器
+selectors:
+  # 试卷图片区域
+  exam_image: "#exam-container img"
+
+  # 得分输入框
+  score_input: "input[name='score']"
+
+  # 下一张按钮
+  next_button: "button.next-exam"
+
+  # 完成按钮（可选）
+  finish_button: "button.finish"
+
+# 截图配置
+screenshot:
+  quality: 90
+  format: "png"
+  save_enabled: true
+
+# 自动化流程配置
+automation:
+  wait_after_navigation: 2000
+  wait_after_fill: 500
+  max_retry: 3
