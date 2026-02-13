@@ -49,7 +49,8 @@ class GradingSystem:
         # 初始化授权管理器
         self.license_manager = None
         if config["settings"]["license"]["enabled"]:
-            self.license_manager = LicenseManager(config["settings"])
+            secret_key = config["settings"]["license"].get("secret_key")
+            self.license_manager = LicenseManager(config["settings"], secret_key=secret_key)
 
         # 初始化 AI 客户端
         self.ai_client = AIClient(config["settings"]["ai"])

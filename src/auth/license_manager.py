@@ -1,19 +1,14 @@
 """
-授权码管理模块
+授权码管理模块（完整版）
 
-负责授权码的验证、存储和有效期检查
+支持本地验证和远程服务器验证
 """
 import os
 import hashlib
 import json
 import time
-from datetime import datetime, timedelta
-from typing import Optional
-
-try:
-    from cryptography.fernet import Fernet
-except ImportError:
-    Fernet = None
+from datetime import datetime
+from typing import Optional, Dict, Any
 
 
 def get_machine_id() -> str:
@@ -39,20 +34,16 @@ def get_machine_id() -> str:
     return hashlib.md5(f"{hostname}{mac}".encode()).hexdigest()
 
 
-def hash_license_code(license_code: str) -> str:
-    """生成授权码的哈希值"""
-    return hashlib.sha256(license_code.encode()).hexdigest()
-
-
 class LicenseManager:
     """授权管理器"""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, secret_key: str = None):
         """
         初始化授权管理器
 
         Args:
-            config: 配置字典，包含 license 相关配置
+            config: 配置字典
+            secret_key: 密钥（用于验证授权码）
         """
         self.enabled = config.get("license", {}).get("enabled", False)
         self.valid_days = config.get("license", {}).get("valid_days", 365)
@@ -61,8 +52,11 @@ class LicenseManager:
         app_data_dir = self._get_app_data_dir()
         self.license_file = os.path.join(app_data_dir, ".grading_system_license")
 
-        # 加密密钥（基于机器ID生成）
-        self.encryption_key = self._generate_key()
+        # 远程验证配置
+        self.server_url = config.get("license", {}).get("server_url", "")
+
+        # 密钥（与 license_generator.py 使用相同的密钥）
+        self.secret_key = secret_key or "default-secret-key-change-this"
 
     def _get_app_data_dir(self) -> str:
         """获取应用数据目录"""
@@ -77,14 +71,6 @@ class LicenseManager:
         os.makedirs(app_dir, exist_ok=True)
         return app_dir
 
-    def _generate_key(self) -> Optional[bytes]:
-        """基于机器ID生成加密密钥"""
-        if Fernet is None:
-            return None
-        machine_id = get_machine_id()
-        key_material = hashlib.sha256(machine_id.encode()).digest()
-        return hashlib.md5(key_material).digest() + b'=' * 16
-
     def verify_license(self, license_code: str) -> bool:
         """
         验证授权码
@@ -98,17 +84,77 @@ class LicenseManager:
         if not self.enabled:
             return True
 
-        # 简单的授权码格式验证
+        # 基本格式验证
         if not license_code or len(license_code) < 16:
             return False
 
-        # 这里可以实现更复杂的验证逻辑
-        # 例如：调用远程服务器验证
-        # 目前使用哈希验证作为示例
-        expected_hash = hash_license_code(license_code)
-        # 实际应用中，应该将授权码哈希与数据库中存储的合法授权码进行比对
+        # 方式一：远程服务器验证
+        if self.server_url:
+            return self._verify_remote(license_code)
 
-        return True
+        # 方式二：本地验证（使用 tools/license_generator.py 的格式）
+        return self._verify_local(license_code)
+
+    def _verify_local(self, license_code: str) -> bool:
+        """本地验证授权码"""
+        try:
+            # 使用与 license_generator.py 相同的密钥进行验证
+            import base64
+
+            # 解码授权码
+            if not license_code.startswith("GS1-"):
+                return False
+
+            parts = license_code[4:].split("-")
+            if len(parts) != 2:
+                return False
+
+            encoded, checksum = parts
+
+            # 验证校验位
+            if checksum != hashlib.md5(encoded.encode()).hexdigest()[:4]:
+                return False
+
+            # Base64 解码
+            decoded = base64.b64decode(encoded).decode()
+
+            # 分离数据和签名
+            data_str, signature = decoded.rsplit(".", 1)
+            data = json.loads(data_str)
+
+            # 验证签名
+            data_str_sorted = json.dumps(data, sort_keys=True)
+            expected_signature = hashlib.sha256(
+                f"{data_str_sorted}{self.secret_key}".encode()
+            ).hexdigest()[:16]
+
+            if signature != expected_signature:
+                return False
+
+            # 检查有效期
+            if time.time() > data.get("expiry", 0):
+                return False
+
+            return True
+
+        except Exception:
+            return False
+
+    def _verify_remote(self, license_code: str) -> bool:
+        """远程服务器验证"""
+        try:
+            import requests
+
+            response = requests.post(
+                self.server_url + "/verify",
+                json={"license_code": license_code},
+                timeout=10
+            )
+            data = response.json()
+            return data.get("valid", False)
+        except:
+            # 服务器不可用时回退到本地验证
+            return self._verify_local(license_code)
 
     def is_authorized(self) -> bool:
         """
@@ -132,7 +178,8 @@ class LicenseManager:
 
             # 检查有效期
             timestamp = license_data.get("timestamp", 0)
-            valid_until = timestamp + (self.valid_days * 24 * 60 * 60)
+            valid_days = license_data.get("valid_days", self.valid_days)
+            valid_until = timestamp + (valid_days * 24 * 60 * 60)
 
             if time.time() > valid_until:
                 return False
@@ -155,20 +202,46 @@ class LicenseManager:
         if not self.verify_license(license_code):
             return False
 
-        license_data = {
-            "code_hash": hash_license_code(license_code),
-            "timestamp": time.time(),
-            "machine_id": get_machine_id(),
-            "valid_days": self.valid_days
-        }
-
+        # 解析授权码获取详细信息
         try:
+            import base64
+
+            if not license_code.startswith("GS1-"):
+                raise ValueError("无效的授权码格式")
+
+            parts = license_code[4:].split("-")
+            encoded = parts[0]
+            decoded = base64.b64decode(encoded).decode()
+            data_str, signature = decoded.rsplit(".", 1)
+            data = json.loads(data_str)
+
+            # 计算过期时间戳
+            expiry = data.get("expiry", int(time.time()))
+
+            license_data = {
+                "license_code": license_code,
+                "user_id": data.get("user_id", ""),
+                "license_type": data.get("license_type", ""),
+                "timestamp": int(time.time()),
+                "machine_id": get_machine_id(),
+                "valid_days": self.valid_days
+            }
+
             self._save_license_data(license_data)
             return True
-        except Exception:
-            return False
 
-    def get_license_info(self) -> dict:
+        except Exception:
+            # 解析失败，使用原始保存方式
+            license_data = {
+                "license_code": license_code,
+                "timestamp": int(time.time()),
+                "machine_id": get_machine_id(),
+                "valid_days": self.valid_days
+            }
+            self._save_license_data(license_data)
+            return True
+
+    def get_license_info(self) -> Dict[str, Any]:
         """
         获取授权信息
 
@@ -181,25 +254,28 @@ class LicenseManager:
         try:
             license_data = self._load_license_data()
             timestamp = license_data.get("timestamp", 0)
+            valid_days = license_data.get("valid_days", self.valid_days)
             valid_until = datetime.fromtimestamp(
-                timestamp + (self.valid_days * 24 * 60 * 60)
+                timestamp + (valid_days * 24 * 60 * 60)
             )
             days_left = (valid_until - datetime.now()).days
 
             return {
                 "authorized": True,
+                "user_id": license_data.get("user_id", ""),
+                "license_type": license_data.get("license_type", ""),
                 "valid_until": valid_until.strftime("%Y-%m-%d"),
                 "days_left": max(0, days_left)
             }
         except Exception:
             return {"authorized": False}
 
-    def _load_license_data(self) -> dict:
+    def _load_license_data(self) -> Dict[str, Any]:
         """加载授权数据"""
         with open(self.license_file, 'r', encoding='utf-8') as f:
             return json.load(f)
 
-    def _save_license_data(self, data: dict):
+    def _save_license_data(self, data: Dict[str, Any]) -> None:
         """保存授权数据"""
         with open(self.license_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)

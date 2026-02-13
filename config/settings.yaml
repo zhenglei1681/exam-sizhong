@@ -4,6 +4,7 @@
 license:
   enabled: true
   valid_days: 365
+  secret_key: "default-secret-key-change-this"  # 授权密钥（需与 license_generator.py 使用相同的密钥）
 
 # AI 配置
 ai:
